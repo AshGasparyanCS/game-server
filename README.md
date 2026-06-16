@@ -1,5 +1,7 @@
 # arena: a real-time multiplayer game server
 
+![tests](https://github.com/AshGasparyanCS/game-server/actions/workflows/tests.yml/badge.svg)
+
 An authoritative WebSocket game server for a top-down arena, with client-side prediction and server reconciliation, a matchmaking queue, and a headless load tester. Built on Python `asyncio` and `websockets`.
 
 The interesting parts (the simulation, and the prediction/reconciliation) live in a pure, network-free module (`server/game.py`), so they're directly unit-testable instead of buried behind sockets.
