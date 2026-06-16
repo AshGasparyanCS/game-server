@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>arena · client</title>
+<style>
+  body{margin:0;background:#0e1116;color:#e6edf3;font-family:'IBM Plex Mono',ui-monospace,monospace;
+       display:flex;flex-direction:column;align-items:center;gap:12px;padding:18px}
+  h1{font-size:15px;margin:0;letter-spacing:.5px}
+  #status{color:#8b949e;font-size:12px}
+  canvas{background:#161b22;border:1px solid #232a33;border-radius:10px}
+  .legend{font-size:11px;color:#8b949e}
+  b{color:#4dd0a7}
+</style></head>
+<body>
+  <h1>● top-down arena</h1>
+  <div id="status">connecting…</div>
+  <canvas id="c" width="800" height="600"></canvas>
+  <div class="legend">move with <b>WASD</b> / arrows · your player is <b>teal</b> · server-authoritative with client prediction + reconciliation</div>
+<script>
+const url = (location.protocol==="https:"?"wss://":"ws://") + (location.hostname||"localhost") + ":8765";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const status = document.getElementById("status");
+const SPEED = 220, TICK = 1/30;
+
+let ws, me=null, others={}, seq=0, pending=[], self={x:400,y:300};
+const keys = {};
+addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
+
+function dir(){
+  let dx=0, dy=0;
+  if(keys["a"]||keys["arrowleft"]) dx-=1;
+  if(keys["d"]||keys["arrowright"]) dx+=1;
+  if(keys["w"]||keys["arrowup"]) dy-=1;
+  if(keys["s"]||keys["arrowdown"]) dy+=1;
+  return [dx,dy];
+}
+function step(x,y,dx,dy,dt){
+  const m=Math.hypot(dx,dy); if(m>1){dx/=m;dy/=m;}
+  return [Math.max(0,Math.min(800,x+dx*SPEED*dt)), Math.max(0,Math.min(600,y+dy*SPEED*dt))];
+}
+
+function connect(){
+  ws = new WebSocket(url);
+  ws.onopen = () => { status.textContent="queued — waiting for an opponent…"; ws.send(JSON.stringify({type:"join",name:"web"})); };
+  ws.onclose = () => status.textContent="disconnected";
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if(m.type==="queued"){ me=m.you; }
+    else if(m.type==="matched"){ me=m.you; const sp=m.spawns[me]; self={...sp}; status.textContent="matched · room "+m.room; }
+    else if(m.type==="state"){
+      for(const p of m.players){
+        if(p.id===me){
+          // reconcile: drop acked inputs, snap to server, replay the rest
+          pending = pending.filter(i => i.seq > p.ack);
+          self.x = p.x; self.y = p.y;
+          for(const i of pending){ [self.x,self.y]=step(self.x,self.y,i.dx,i.dy,i.dt); }
+        } else { others[p.id] = {x:p.x,y:p.y}; }
+      }
+    }
+  };
+}
+
+// send inputs at the tick rate, predicting locally
+setInterval(() => {
+  if(!ws || ws.readyState!==1 || !me) return;
+  const [dx,dy]=dir();
+  if(dx===0 && dy===0) return;
+  seq++;
+  const inp={type:"input",seq,dx,dy,dt:TICK};
+  pending.push(inp);
+  [self.x,self.y]=step(self.x,self.y,dx,dy,TICK); // prediction
+  ws.send(JSON.stringify(inp));
+}, TICK*1000);
+
+function draw(){
+  ctx.clearRect(0,0,800,600);
+  for(const id in others){
+    ctx.fillStyle="#7aa2f7"; ctx.beginPath();
+    ctx.arc(others[id].x, others[id].y, 12, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle="#4dd0a7"; ctx.beginPath();
+  ctx.arc(self.x, self.y, 13, 0, 7); ctx.fill();
+  requestAnimationFrame(draw);
+}
+connect(); draw();
+</script>
+</body></html>
